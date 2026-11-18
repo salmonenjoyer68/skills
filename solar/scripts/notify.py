@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sol-O notifier stage: deliver a finished run to Telegram (dry-run by default)."""
+"""Solar notifier stage: deliver a finished run to Telegram (dry-run by default)."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
 
 def build_message(run: dict) -> str:
     verdict = run.get("verdict")
-    header = f"Sol-O run {run.get('id', '?')}\nStatus: {run.get('status', 'unknown')}"
+    header = f"Solar run {run.get('id', '?')}\nStatus: {run.get('status', 'unknown')}"
     if verdict:
         header += f" | Verdict: {verdict}"
     lines = [header, "", f"Task: {run.get('task', '')}", "", "Draft:", run.get("draft", "")]
@@ -100,7 +100,7 @@ def write_delivery(run_path: Path, run: dict, delivery: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Notify Telegram about a logged Sol-O run.")
+    parser = argparse.ArgumentParser(description="Notify Telegram about a logged Solar run.")
     parser.add_argument("--run-dir", required=True, type=Path)
     args = parser.parse_args()
 
@@ -146,7 +146,7 @@ def main() -> int:
         print(f"notifier: {error}", file=sys.stderr)
         return 1
 
-    url = os.environ.get("SOL_O_TELEGRAM_ENDPOINT", "").strip() or (
+    url = os.environ.get("SOLAR_TELEGRAM_ENDPOINT", "").strip() or (
         f"https://api.telegram.org/bot{token}/sendMessage"
     )
     try:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sol-O logger stage: assemble run.json and index.jsonl from stage artifacts."""
+"""Solar logger stage: assemble run.json and index.jsonl from stage artifacts."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def build_record(run_dir: Path) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Log a Sol-O run from its stage artifacts.")
+    parser = argparse.ArgumentParser(description="Log a Solar run from its stage artifacts.")
     parser.add_argument("--run-dir", required=True, type=Path)
     args = parser.parse_args()
 

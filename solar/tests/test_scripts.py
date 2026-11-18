@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load(name):
     spec = importlib.util.spec_from_file_location(
-        f"sol_o_{name}", ROOT / "scripts" / f"{name}.py"
+        f"solar_{name}", ROOT / "scripts" / f"{name}.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

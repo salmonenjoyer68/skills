@@ -1,11 +1,11 @@
 ---
-name: sol-o
-description: "Answer a customer inquiry through the Sol-O pipeline: researcher → writer → checker → logger → notifier. Use when the user wants a researched, fact-checked reply or email to a customer, asks to run Sol-O or the researcher-writer-checker pipeline, or wants an audited answer with optional Telegram delivery. Works on web evidence plus any internal context the user supplies."
+name: solar
+description: "Answer a customer inquiry through the Solar pipeline: researcher → writer → checker → logger → notifier. Use when the user wants a researched, fact-checked reply or email to a customer, asks to run Solar or the researcher-writer-checker pipeline, or wants an audited answer with optional Telegram delivery. Works on web evidence plus any internal context the user supplies."
 ---
 
-# Sol-O
+# Solar
 
-Sol-O turns one customer inquiry into a sourced, fact-checked reply: research first, a draft written only from that research, an independent checker, a durable run record, then delivery. Ported from [Sol-O](https://github.com/salmonenjoyer68/Sol-O).
+Solar turns one customer inquiry into a sourced, fact-checked reply: research first, a draft written only from that research, an independent checker, a durable run record, then delivery. Ported from [Sol-O](https://github.com/salmonenjoyer68/Sol-O).
 
 Stages are fixed. Never add, drop, or reorder them:
 
@@ -28,7 +28,7 @@ The writer may run twice: once from research, once from checker issues. Nothing 
 
 ## Run directory
 
-Create `sol-o-runs/<run-id>/` in the working directory, where `<run-id>` is UTC `YYYYMMDDTHHMMSSZ` plus `-` and 4 random hex characters (for example `20261118T143800Z-a1b2`). Write `meta.json` first with your file-write tool:
+Create `solar-runs/<run-id>/` in the working directory, where `<run-id>` is UTC `YYYYMMDDTHHMMSSZ` plus `-` and 4 random hex characters (for example `20261118T143800Z-a1b2`). Write `meta.json` first with your file-write tool:
 
 ```json
 {"id":"<run-id>","task":"<inquiry>","source":"cli","started_at":"<UTC ISO-8601>"}
@@ -63,21 +63,21 @@ Fresh subagent with `agents/checker.md`, the inquiry, `research.json`, and `draf
 ## 4. Logger
 
 ```bash
-python3 <skill-dir>/scripts/logger.py --run-dir sol-o-runs/<run-id>
+python3 <skill-dir>/scripts/logger.py --run-dir solar-runs/<run-id>
 ```
 
-It reads `meta.json` and the stage artifacts and writes `run.json`, appending one line to `sol-o-runs/index.jsonl`. It derives `status` (`complete`, `partial`, `needs_clarification`, `failed`) and carries the checker's `verdict` and `issues`. On a non-zero exit, report it and do not notify.
+It reads `meta.json` and the stage artifacts and writes `run.json`, appending one line to `solar-runs/index.jsonl`. It derives `status` (`complete`, `partial`, `needs_clarification`, `failed`) and carries the checker's `verdict` and `issues`. On a non-zero exit, report it and do not notify.
 
 ## 5. Notifier
 
 ```bash
-python3 <skill-dir>/scripts/notify.py --run-dir sol-o-runs/<run-id>
+python3 <skill-dir>/scripts/notify.py --run-dir solar-runs/<run-id>
 ```
 
 - Skips failed and clarification runs; nothing is sent without a draft.
 - Dry run by default (`DRY_RUN` unset or true): prints the message and records `delivery.dry_run`.
 - Sends only when `DRY_RUN=false` and `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are set. Messages over 4000 characters are split; one retry on transient failures.
-- `SOL_O_TELEGRAM_ENDPOINT` overrides the Telegram URL, for local testing.
+- `SOLAR_TELEGRAM_ENDPOINT` overrides the Telegram URL, for local testing.
 
 ## Final reply
 
