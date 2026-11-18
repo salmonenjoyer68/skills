@@ -66,7 +66,7 @@ Fresh subagent with `agents/checker.md`, the inquiry, `research.json`, and `draf
 python3 <skill-dir>/scripts/logger.py --run-dir solar-runs/<run-id>
 ```
 
-It reads `meta.json` and the stage artifacts and writes `run.json`, appending one line to `solar-runs/index.jsonl`. It derives `status` (`complete`, `partial`, `needs_clarification`, `failed`) and carries the checker's `verdict` and `issues`. On a non-zero exit, report it and do not notify.
+It reads `meta.json` and the stage artifacts and writes `run.json`, appending one line to `solar-runs/index.jsonl`. It derives `status` (`complete`, `partial`, `needs_clarification`, `failed`) and carries the checker's `verdict` and `issues`; a run is `complete` only when all three stage artifacts exist. On a non-zero exit, report it and do not notify.
 
 ## 5. Notifier
 

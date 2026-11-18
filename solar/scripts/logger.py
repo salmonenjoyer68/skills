@@ -42,6 +42,9 @@ def derive_status(outputs: dict) -> str:
         return "needs_clarification" if needs_clarification else "failed"
     if needs_clarification:
         return "needs_clarification"
+    if len(outputs) < len(STAGE_FILES):
+        # A fixed stage never ran: never report or deliver the run as complete.
+        return "failed"
     if any((output or {}).get("status") == "partial" for output in outputs.values()):
         return "partial"
     return "complete"

@@ -16,24 +16,40 @@ TELEGRAM_LIMIT = 4000
 FALSE_VALUES = {"false", "0", "no", "off"}
 
 
+def utf16_units(text: str) -> int:
+    # Telegram counts UTF-16 code units, so an emoji costs 2.
+    return len(text.encode("utf-16-le")) // 2
+
+
+def fit_prefix(text: str, limit: int) -> int:
+    """Length of the longest prefix within limit UTF-16 units; always at least 1 char."""
+    total = 0
+    for index, char in enumerate(text):
+        total += 2 if ord(char) > 0xFFFF else 1
+        if total > limit:
+            return index or 1
+    return len(text)
+
+
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
-    """Split on paragraph boundaries, then hard-wrap, never over limit characters."""
-    if len(text) <= limit:
+    """Split on paragraph boundaries, then hard-wrap, never over limit UTF-16 units."""
+    if utf16_units(text) <= limit:
         return [text]
     chunks: list[str] = []
     current = ""
     for paragraph in text.split("\n\n"):
         candidate = paragraph if not current else f"{current}\n\n{paragraph}"
-        if len(candidate) <= limit:
+        if utf16_units(candidate) <= limit:
             current = candidate
             continue
         if current:
             chunks.append(current)
             current = ""
         rest = paragraph
-        while len(rest) > limit:
-            chunks.append(rest[:limit])
-            rest = rest[limit:]
+        while utf16_units(rest) > limit:
+            cut = fit_prefix(rest, limit)
+            chunks.append(rest[:cut])
+            rest = rest[cut:]
         current = rest
     if current:
         chunks.append(current)
@@ -83,7 +99,8 @@ def send_part(url: str, chat_id: str, text: str, token: str) -> None:
                 last_error = f"HTTP {response.status}"
         except urllib.error.HTTPError as exc:
             last_error = f"HTTP {exc.code}"
-            if exc.code < 500:
+            # 429 is a transient rate limit; other 4xx are fatal.
+            if exc.code < 500 and exc.code != 429:
                 break
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = str(exc)
@@ -113,14 +130,15 @@ def main() -> int:
         raise SystemExit(f"notifier: invalid {run_path.name}: {exc}")
 
     status = run.get("status")
-    if status not in {"complete", "partial"} or not (run.get("draft") or "").strip():
-        reason = "empty draft" if status in {"complete", "partial"} else "no deliverable"
+    draft = (run.get("draft") or "").strip()
+    if status not in {"complete", "partial"} or not draft:
+        reason = "empty draft" if not draft else f"status={status}"
         write_delivery(
             run_path,
             run,
             {"dry_run": None, "delivered": False, "skipped": True, "reason": reason},
         )
-        print(f"notifier: skipped ({reason}, status={status})")
+        print(f"notifier: skipped ({reason})")
         return 0
 
     message = build_message(run)

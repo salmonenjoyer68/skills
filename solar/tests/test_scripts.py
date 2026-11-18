@@ -1,9 +1,13 @@
 import importlib.util
 import json
+import os
+import sys
 import tempfile
 import unittest
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +39,11 @@ class SplitMessageTest(unittest.TestCase):
             notify.split_message("aaaa\n\nbbbb\n\ncccccccccccc", 10),
             ["aaaa\n\nbbbb", "cccccccccc", "cc"],
         )
+
+    def test_emoji_are_split_by_utf16_units(self):
+        parts = notify.split_message("😀" * 5, 9)
+        self.assertEqual(parts, ["😀" * 4, "😀"])
+        self.assertLessEqual(max(notify.utf16_units(part) for part in parts), 9)
 
 
 class LoggerTest(unittest.TestCase):
@@ -85,6 +94,15 @@ class LoggerTest(unittest.TestCase):
             "needs_clarification",
         )
 
+    def test_missing_checker_is_failed(self):
+        record = self.record(
+            {
+                "research.json": {"status": "complete"},
+                "draft.json": {"status": "complete", "draft": "reply"},
+            }
+        )
+        self.assertEqual(record["status"], "failed")
+
 
 class MessageTest(unittest.TestCase):
     def test_issues_are_included(self):
@@ -106,6 +124,62 @@ class MessageTest(unittest.TestCase):
         )
         self.assertIn("unsupported price", message)
         self.assertIn("prices", message)
+
+
+class RetryTest(unittest.TestCase):
+    def test_429_is_retried_once(self):
+        calls = []
+
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url, 429, "Too Many Requests", {}, None
+                )
+            return Response()
+
+        with (
+            mock.patch.object(notify.urllib.request, "urlopen", fake_urlopen),
+            mock.patch.object(notify.time, "sleep", lambda _: None),
+        ):
+            notify.send_part("https://example.test/botTOKEN/sendMessage", "1", "hi", "TOKEN")
+        self.assertEqual(len(calls), 2)
+
+
+class NotifySkipTest(unittest.TestCase):
+    def test_failed_run_is_skipped_without_sending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_path = Path(tmp) / "run.json"
+            run_path.write_text(json.dumps({"id": "r", "status": "failed", "draft": "x"}))
+            with (
+                mock.patch.object(sys, "argv", ["notify.py", "--run-dir", tmp]),
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "DRY_RUN": "false",
+                        "TELEGRAM_BOT_TOKEN": "t",
+                        "TELEGRAM_CHAT_ID": "1",
+                    },
+                ),
+                mock.patch.object(
+                    notify.urllib.request,
+                    "urlopen",
+                    side_effect=AssertionError("must not send"),
+                ),
+            ):
+                self.assertEqual(notify.main(), 0)
+            delivery = json.loads(run_path.read_text(encoding="utf-8"))["delivery"]
+            self.assertTrue(delivery["skipped"])
+            self.assertFalse(delivery["delivered"])
 
 
 if __name__ == "__main__":
