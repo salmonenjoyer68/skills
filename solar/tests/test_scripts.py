@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -65,7 +66,7 @@ class LoggerTest(unittest.TestCase):
     def test_approved_run_is_complete(self):
         record = self.record(
             {
-                "research.json": {"status": "complete"},
+                "research.json": {"status": "complete", "findings": []},
                 "draft.json": {"status": "complete", "draft": "reply"},
                 "review.json": {"status": "complete", "verdict": "approved", "issues": []},
             }
@@ -78,7 +79,7 @@ class LoggerTest(unittest.TestCase):
     def test_partial_stage_makes_run_partial(self):
         record = self.record(
             {
-                "research.json": {"status": "partial"},
+                "research.json": {"status": "partial", "findings": []},
                 "draft.json": {"status": "complete", "draft": "reply"},
                 "review.json": {"status": "complete", "verdict": "approved", "issues": []},
             }
@@ -87,21 +88,35 @@ class LoggerTest(unittest.TestCase):
 
     def test_missing_draft_is_failed_unless_clarification(self):
         self.assertEqual(
-            self.record({"research.json": {"status": "complete"}})["status"], "failed"
+            self.record({"research.json": {"status": "complete", "findings": []}})[
+                "status"
+            ],
+            "failed",
         )
         self.assertEqual(
-            self.record({"research.json": {"status": "needs_clarification"}})["status"],
+            self.record(
+                {"research.json": {"status": "needs_clarification", "findings": []}}
+            )["status"],
             "needs_clarification",
         )
 
     def test_missing_checker_is_failed(self):
         record = self.record(
             {
-                "research.json": {"status": "complete"},
+                "research.json": {"status": "complete", "findings": []},
                 "draft.json": {"status": "complete", "draft": "reply"},
             }
         )
         self.assertEqual(record["status"], "failed")
+
+    def test_invalid_artifact_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            self.record(
+                {
+                    "research.json": {"status": "complete", "findings": []},
+                    "draft.json": {"status": "complete", "draft": 1},
+                }
+            )
 
 
 class MessageTest(unittest.TestCase):
@@ -126,32 +141,68 @@ class MessageTest(unittest.TestCase):
         self.assertIn("prices", message)
 
 
+class Response:
+    def __init__(self, payload=b'{"ok": true, "result": {"message_id": 1}}'):
+        self.payload = payload
+        self.status = 200
+
+    def read(self):
+        return self.payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 class RetryTest(unittest.TestCase):
-    def test_429_is_retried_once(self):
+    def send(self, responses, waits):
         calls = []
 
-        class Response:
-            status = 200
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-        def fake_urlopen(request, timeout):
+        def fake_open_url(request):
             calls.append(request.full_url)
-            if len(calls) == 1:
-                raise urllib.error.HTTPError(
-                    request.full_url, 429, "Too Many Requests", {}, None
-                )
-            return Response()
+            item = responses[len(calls) - 1]
+            if isinstance(item, Exception):
+                raise item
+            return item
 
         with (
-            mock.patch.object(notify.urllib.request, "urlopen", fake_urlopen),
-            mock.patch.object(notify.time, "sleep", lambda _: None),
+            mock.patch.object(notify, "open_url", fake_open_url),
+            mock.patch.object(notify.time, "sleep", waits.append),
         ):
             notify.send_part("https://example.test/botTOKEN/sendMessage", "1", "hi", "TOKEN")
+        return calls
+
+    def test_429_waits_for_retry_after(self):
+        error = urllib.error.HTTPError(
+            "https://example.test",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(b'{"ok": false, "parameters": {"retry_after": 3}}'),
+        )
+        waits = []
+        calls = self.send([error, Response()], waits)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(waits, [3])
+
+    def test_retry_after_beyond_budget_is_reported(self):
+        error = urllib.error.HTTPError(
+            "https://example.test",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(b'{"ok": false, "parameters": {"retry_after": 60}}'),
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            self.send([error], [])
+        self.assertIn("retry after 60s", str(caught.exception))
+
+    def test_not_ok_response_is_retried(self):
+        calls = self.send(
+            [Response(b'{"ok": false, "description": "chat not found"}'), Response()], []
+        )
         self.assertEqual(len(calls), 2)
 
 
@@ -171,8 +222,8 @@ class NotifySkipTest(unittest.TestCase):
                     },
                 ),
                 mock.patch.object(
-                    notify.urllib.request,
-                    "urlopen",
+                    notify,
+                    "open_url",
                     side_effect=AssertionError("must not send"),
                 ),
             ):
@@ -180,6 +231,41 @@ class NotifySkipTest(unittest.TestCase):
             delivery = json.loads(run_path.read_text(encoding="utf-8"))["delivery"]
             self.assertTrue(delivery["skipped"])
             self.assertFalse(delivery["delivered"])
+
+
+class EndpointTest(unittest.TestCase):
+    def run_notifier(self, endpoint):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_path = Path(tmp) / "run.json"
+            run_path.write_text(
+                json.dumps({"id": "r", "status": "complete", "draft": "d"})
+            )
+            env = {
+                "DRY_RUN": "false",
+                "TELEGRAM_BOT_TOKEN": "t",
+                "TELEGRAM_CHAT_ID": "1",
+                "SOLAR_TELEGRAM_ENDPOINT": endpoint,
+            }
+            with (
+                mock.patch.object(sys, "argv", ["notify.py", "--run-dir", tmp]),
+                mock.patch.dict(os.environ, env),
+                mock.patch.object(
+                    notify, "open_url", side_effect=AssertionError("must not send")
+                ),
+            ):
+                code = notify.main()
+            return code, json.loads(run_path.read_text(encoding="utf-8"))["delivery"]
+
+    def test_http_network_endpoint_is_rejected(self):
+        code, delivery = self.run_notifier("http://example.test/send")
+        self.assertEqual(code, 1)
+        self.assertFalse(delivery["delivered"])
+        self.assertNotIn("example.test", delivery["error"])
+
+    def test_endpoint_without_scheme_is_rejected(self):
+        code, delivery = self.run_notifier("example.test/send")
+        self.assertEqual(code, 1)
+        self.assertIn("scheme", delivery["error"])
 
 
 if __name__ == "__main__":

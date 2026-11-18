@@ -14,6 +14,28 @@ STAGE_FILES = (
     ("checker", "review.json"),
 )
 
+STAGE_FIELDS = {
+    "research": (("findings", list),),
+    "writer": (("draft", str),),
+    "checker": (("verdict", str), ("issues", list)),
+}
+STATUSES = {"complete", "partial", "needs_clarification"}
+VERDICTS = {"approved", "needs_changes"}
+
+
+def validate_output(name: str, output) -> dict:
+    """Reject an artifact that cannot satisfy its role's output contract."""
+    if not isinstance(output, dict):
+        raise SystemExit(f"logger: {name} artifact is not a JSON object")
+    if output.get("status") not in STATUSES:
+        raise SystemExit(f"logger: {name} artifact has invalid status")
+    for key, kind in STAGE_FIELDS[name]:
+        if not isinstance(output.get(key), kind):
+            raise SystemExit(f"logger: {name} artifact has invalid '{key}'")
+    if name == "checker" and output["verdict"] not in VERDICTS:
+        raise SystemExit("logger: checker artifact has invalid 'verdict'")
+    return output
+
 
 def read_json(path: Path):
     try:
@@ -58,7 +80,7 @@ def build_record(run_dir: Path) -> dict:
     for name, filename in STAGE_FILES:
         output = read_json(run_dir / filename)
         if output is not None:
-            outputs[name] = output
+            outputs[name] = validate_output(name, output)
     failure = read_json(run_dir / "failure.json")
     review = outputs.get("checker") or {}
     writer = outputs.get("writer") or {}

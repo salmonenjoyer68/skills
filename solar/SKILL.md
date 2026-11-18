@@ -24,7 +24,7 @@ The writer may run twice: once from research, once from checker issues. Nothing 
 - The inquiry text. Read the file the user points at.
 - Optional `source` conversation key (email thread, chat id). Default `cli`.
 - Optional internal context: files or a `kb/` directory the user names. Pass only the relevant excerpts to the researcher; treat them as internal evidence, not citations.
-- Web access for the researcher. Without it, research must come back explicitly unverified.
+- Web access for the researcher. Without it, supplied internal context can still support a finding (marked `[internal: …]`); anything neither source supports is `unverified`.
 
 ## Run directory
 
@@ -40,7 +40,7 @@ All stage artifacts go in this directory. Never write run artifacts into the ski
 
 Read `agents/researcher.md` and run it as a fresh subagent (Task tool, `task`, or the platform equivalent), with the role text as its system prompt. Give it only the inquiry and the internal context. Do not give it your own analysis.
 
-- Save its JSON output as `research.json`. Validate with `python3 -m json.tool research.json >/dev/null`.
+- Save its JSON output as `research.json`. Validate with `python3 -m json.tool solar-runs/<run-id>/research.json >/dev/null`.
 - Invalid JSON or a missing report: re-run the stage once, quoting the validation error. On a second failure, write `failure.json` (`{"stage":"researcher","error":"..."}`) and go to Logger.
 - `status: needs_clarification`: save the artifact, go to Logger, then ask the user its single question.
 
@@ -49,6 +49,8 @@ If you cannot spawn subagents, adopt the role yourself: read only the role file 
 ## 2. Writer
 
 Fresh subagent with `agents/writer.md`, the inquiry, and `research.json`. Save as `draft.json`; same validation and retry. The writer never sees your analysis, only the inputs.
+
+- `status: needs_clarification` or an empty `draft`: go to Logger, then ask the user its single question; do not run the Checker.
 
 If the researcher returned nothing usable, do not let the writer invent facts: carry the limitation through to the final reply.
 
@@ -66,7 +68,7 @@ Fresh subagent with `agents/checker.md`, the inquiry, `research.json`, and `draf
 python3 <skill-dir>/scripts/logger.py --run-dir solar-runs/<run-id>
 ```
 
-It reads `meta.json` and the stage artifacts and writes `run.json`, appending one line to `solar-runs/index.jsonl`. It derives `status` (`complete`, `partial`, `needs_clarification`, `failed`) and carries the checker's `verdict` and `issues`; a run is `complete` only when all three stage artifacts exist. On a non-zero exit, report it and do not notify.
+It reads `meta.json` and the stage artifacts and writes `run.json`, appending one line to `solar-runs/index.jsonl`. It derives `status` (`complete`, `partial`, `needs_clarification`, `failed`) and carries the checker's `verdict` and `issues`; a run is `complete` only when all three stage artifacts exist and match their role's output contract (valid `status`, plus `findings`, `draft`, and `verdict`/`issues` respectively). An artifact that fails validation exits non-zero. On a non-zero exit, report it and do not notify.
 
 ## 5. Notifier
 
@@ -77,13 +79,13 @@ python3 <skill-dir>/scripts/notify.py --run-dir solar-runs/<run-id>
 - Skips failed and clarification runs; nothing is sent without a draft.
 - Dry run by default (`DRY_RUN` unset or true): prints the message and records `delivery.dry_run`.
 - Sends only when `DRY_RUN=false` and `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are set. Messages over 4000 characters are split; one retry on transient failures.
-- `SOLAR_TELEGRAM_ENDPOINT` overrides the Telegram URL, for local testing.
+- `SOLAR_TELEGRAM_ENDPOINT` overrides the Telegram URL, for local testing: https, or http on a loopback host. Redirects are never followed.
 
 ## Final reply
 
 Give the user, in order:
 
-1. The draft text, ready to send — not a summary of it.
+1. The draft text, labeled ready to send only when the final verdict is `approved` (an approved partial run counts); otherwise show it labeled unresolved with the open issues.
 2. One short status block: run id, verdict, unresolved issues, run directory, delivery result.
 3. If clarification is needed, ask exactly the stage's one question and stop.
 

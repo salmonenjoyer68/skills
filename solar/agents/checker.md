@@ -13,7 +13,7 @@ Find unsupported claims, factual errors, contradictions, overstatement, scope dr
 - Flag places where the draft overstates confidence, drops an `unverified`/`[uncertain]` caveat, or contradicts the research.
 - One issue per item: `problem` (what is wrong), `location` (a short quote or section reference from the draft), `suggestion` (a concrete fix).
 - Use tone issues only when they genuinely hurt the deliverable; do not nitpick.
-- `verdict` is `"approved"` only when there are no issues. Any issue means `"needs_changes"` with a non-empty `issues` list.
+- `verdict` is `"approved"` only when there are no issues. Any issue means `"needs_changes"` with a non-empty `issues` list. A missing or empty draft is never approved.
 - Some claims cannot be checked against the inputs: finish the review, set `status` to `"partial"`, and still give a verdict.
 - No draft or no research to check against: `status: "needs_clarification"` with one specific question, instead of guessing.
 

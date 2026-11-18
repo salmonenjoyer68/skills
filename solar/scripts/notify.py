@@ -9,11 +9,33 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 TELEGRAM_LIMIT = 4000
 FALSE_VALUES = {"false", "0", "no", "off"}
+MAX_RETRY_WAIT = 10  # seconds we are willing to block a CLI run for a 429
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # a redirect is never a Telegram success
+
+
+_opener = urllib.request.build_opener(_NoRedirect)
+
+
+def open_url(request):
+    return _opener.open(request, timeout=30)
+
+
+def retry_after(exc: urllib.error.HTTPError) -> int | None:
+    try:
+        value = json.loads(exc.read() or b"{}").get("parameters", {}).get("retry_after")
+        return int(value) if value is not None else None
+    except (AttributeError, TypeError, ValueError, OSError):
+        return None
 
 
 def utf16_units(text: str) -> int:
@@ -88,32 +110,51 @@ def send_part(url: str, chat_id: str, text: str, token: str) -> None:
         {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
     ).encode("utf-8")
     last_error = ""
+    delay = 1
     for attempt in (1, 2):
         request = urllib.request.Request(
             url, data=body, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                if 200 <= response.status < 300:
-                    return
-                last_error = f"HTTP {response.status}"
+            with open_url(request) as response:
+                if not 200 <= response.status < 300:
+                    last_error = f"HTTP {response.status}"
+                else:
+                    try:
+                        payload = json.loads(response.read() or b"{}")
+                    except ValueError:
+                        payload = {}
+                    if payload.get("ok") is True:
+                        return
+                    last_error = f"not ok: {payload.get('description', 'invalid response')}"
         except urllib.error.HTTPError as exc:
             last_error = f"HTTP {exc.code}"
-            # 429 is a transient rate limit; other 4xx are fatal.
-            if exc.code < 500 and exc.code != 429:
+            if exc.code == 429:
+                wait = retry_after(exc)
+                if wait is not None and wait > MAX_RETRY_WAIT:
+                    last_error += f" rate limited; retry after {wait}s"
+                    break
+                delay = wait or 1
+            elif exc.code < 500:
                 break
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = str(exc)
         if attempt == 1:
-            time.sleep(1)
+            time.sleep(delay)
     raise RuntimeError(last_error.replace(token, "***"))
 
 
 def write_delivery(run_path: Path, run: dict, delivery: dict) -> None:
     run["delivery"] = delivery
-    run_path.write_text(
-        json.dumps(run, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    tmp = run_path.with_suffix(".tmp")
+    try:
+        tmp.write_text(
+            json.dumps(run, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        os.replace(tmp, run_path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def main() -> int:
@@ -167,6 +208,20 @@ def main() -> int:
     url = os.environ.get("SOLAR_TELEGRAM_ENDPOINT", "").strip() or (
         f"https://api.telegram.org/bot{token}/sendMessage"
     )
+    parsed = urllib.parse.urlsplit(url)
+    loopback = parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+    if not parsed.scheme:
+        error = "SOLAR_TELEGRAM_ENDPOINT is missing a URL scheme"
+    elif parsed.scheme != "https" and not (parsed.scheme == "http" and loopback):
+        error = "SOLAR_TELEGRAM_ENDPOINT must use https (http only for loopback)"
+    else:
+        error = ""
+    if error:
+        write_delivery(
+            run_path, run, {"dry_run": False, "delivered": False, "error": error}
+        )
+        print(f"notifier: {error}", file=sys.stderr)
+        return 1
     try:
         for part in parts:
             send_part(url, chat_id, part, token)

@@ -25,7 +25,7 @@ Answer the inquiry's factual questions: find, verify, and report them. You resea
 
 ## Confidence
 
-- `high` — primary/official source, or 2+ independent reputable sources that agree, and current.
+- `high` — 2+ independent reputable sources that agree, and current.
 - `medium` — one reputable source, partial agreement, or a fast-changing topic.
 - `low` — weak source, conflicting evidence, or inference from incomplete data.
 
