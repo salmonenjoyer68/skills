@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Solar run artifacts (written to the working directory, never committed)
+solar-runs/
+
+# Editors and environments
+.venv/
+.DS_Store
