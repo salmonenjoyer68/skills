@@ -1,6 +1,7 @@
 ---
 name: solar
 description: "Answer a customer inquiry through the Solar pipeline: researcher → writer → checker → logger → notifier. Use when the user wants a researched, fact-checked reply or email to a customer, asks to run Solar or the researcher-writer-checker pipeline, or wants an audited answer with optional Telegram delivery. Works on web evidence plus any internal context the user supplies."
+license: MIT
 ---
 
 # Solar
